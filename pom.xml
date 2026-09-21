@@ -17,9 +17,12 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>config-server</module>
         <module>eureka-server</module>
         <module>auth-service</module>
         <module>pedido-service</module>
+        <module>fornecedores-service</module>
+        <module>gateway-service</module>
     </modules>
 
     <properties>

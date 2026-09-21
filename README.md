@@ -2,19 +2,24 @@
 
 ## Carlos Eduardo Menezes - 147.072.387-50 
 
-Implementei uma arquitetura com um servidor Eureka e dois microsservicos independentes:
+Implementei uma arquitetura com um Config Server, um servidor Eureka, um Gateway e tres microsservicos independentes:
 
+- `config-server`: disponibiliza as configuracoes centralizadas da pasta `config-repo`.
 - `eureka-server`: servidor de descoberta dos microsservicos.
 - `auth-service`: autentica o usuario e gera tokens JWT.
 - `pedido-service`: disponibiliza o CRUD protegido de pedidos usando H2.
+- `fornecedores-service`: disponibiliza o CRUD protegido de fornecedores usando H2.
+- `gateway-service`: encaminha requisicoes para os servicos descobertos pelo Eureka.
 
-O Eureka roda na porta `8761`, o `auth-service` na porta `8081` e o `pedido-service` na porta `8082`. Os dois microsservicos se registram no Eureka. O pedido-service valida localmente a assinatura, a validade e o tipo do JWT.
+O Config Server roda na porta `8888`, o Eureka na porta `8761`, o Gateway na porta `8085`, o `auth-service` na porta `8081`, o `pedido-service` na porta `8082` e o `fornecedores-service` na porta `8084`. Os tres microsservicos e o Gateway carregam suas configuracoes pelo Config Server e se registram no Eureka.
 
 ## Tecnologias
 
 - Java 17
 - Spring Boot 3.4.5
 - Spring Cloud Netflix Eureka
+- Spring Cloud Config Server
+- Spring Cloud Gateway
 - Maven
 - JWT com JJWT
 - H2 e Spring Data JPA
@@ -29,7 +34,11 @@ Na raiz do projeto, compile os servicos:
 mvn clean package
 ```
 
-Em tres terminais, execute nesta ordem:
+Em seis terminais, execute nesta ordem:
+
+```bash
+mvn -pl config-server spring-boot:run
+```
 
 ```bash
 mvn -pl eureka-server spring-boot:run
@@ -41,6 +50,91 @@ mvn -pl auth-service spring-boot:run
 
 ```bash
 mvn -pl pedido-service spring-boot:run
+```
+
+```bash
+mvn -pl fornecedores-service spring-boot:run
+```
+
+```bash
+mvn -pl gateway-service spring-boot:run
+```
+
+O Config Server deve iniciar antes dos outros servicos, pois eles carregam as propriedades da pasta `config-repo` por meio de `http://localhost:8888`.
+
+## Docker Compose
+
+Eu criei um Dockerfile para cada servico e um perfil `docker` no `config-repo`. Nesse perfil, o Eureka e acessado pelo nome `eureka-server` dentro da rede Docker.
+
+Para subir tudo de uma vez:
+
+```bash
+docker compose up --build
+```
+
+Para listar fornecedores pelo Gateway:
+
+```bash
+curl http://localhost:8085/fornecedores-service/api/fornecedores
+```
+
+Para consultar pedidos pelo endpoint Feign do fornecedores-service:
+
+```bash
+curl http://localhost:8085/fornecedores-service/fornecedores/pedidos
+```
+
+As rotas protegidas continuam exigindo o cabecalho `Authorization` com um access token JWT.
+
+## Gateway
+
+O Gateway descobre automaticamente os servicos registrados no Eureka. Eu nao cadastrei rotas manualmente.
+
+Para listar fornecedores pelo Gateway:
+
+```bash
+curl http://localhost:8085/fornecedores-service/api/fornecedores -H "Authorization: Bearer COLE_O_ACCESS_TOKEN"
+```
+
+O Gateway remove automaticamente o prefixo `fornecedores-service` antes de encaminhar a requisicao para o endpoint `/api/fornecedores` do servico.
+
+## Consulta de pedidos via Feign
+
+O `fornecedores-service` consulta o `pedido-service` usando OpenFeign. O cliente Feign descobre o `pedido-service` pelo Eureka e encaminha o token JWT recebido na requisicao.
+
+Para consultar os pedidos diretamente pelo `fornecedores-service`:
+
+```bash
+curl http://localhost:8084/fornecedores/pedidos -H "Authorization: Bearer COLE_O_ACCESS_TOKEN"
+```
+
+Para consultar pelo Gateway:
+
+```bash
+curl http://localhost:8085/fornecedores-service/fornecedores/pedidos -H "Authorization: Bearer COLE_O_ACCESS_TOKEN"
+```
+
+A resposta sera uma lista com os pedidos cadastrados no `pedido-service`.
+
+## Config Server
+
+As configuracoes centralizadas ficam na pasta `config-repo`:
+
+- `application.properties`: configuracoes compartilhadas.
+- `eureka-server.properties`: configuracoes do Eureka.
+- `auth-service.properties`: configuracoes do auth-service.
+- `pedido-service.properties`: configuracoes do pedido-service.
+- `fornecedores-service.properties`: configuracoes do fornecedores-service.
+- `gateway-service.properties`: configuracoes do gateway-service.
+- Arquivos `*-docker.properties`: configuracoes usadas dentro da rede Docker.
+
+Para consultar as configuracoes carregadas pelo Config Server:
+
+```text
+http://localhost:8888/auth-service/default
+http://localhost:8888/pedido-service/default
+http://localhost:8888/fornecedores-service/default
+http://localhost:8888/eureka-server/default
 ```
 
 ## Endpoints publicos
@@ -122,6 +216,46 @@ Remove um pedido:
 
 ```bash
 curl -X DELETE http://localhost:8082/api/pedidos/1 -H "Authorization: Bearer COLE_O_ACCESS_TOKEN"
+```
+
+## Fornecedores
+
+O `fornecedores-service` cadastra cinco fornecedores automaticamente quando inicia com o banco vazio. O nome e o CNPJ sao obrigatorios, e o CNPJ e unico.
+
+Console H2: http://localhost:8084/h2-console
+
+- JDBC URL: `jdbc:h2:mem:fornecedoresdb`
+- Usuario: `sa`
+- Senha: deixe vazia
+
+### POST http://localhost:8084/api/fornecedores
+
+```bash
+curl -X POST http://localhost:8084/api/fornecedores -H "Authorization: Bearer COLE_O_ACCESS_TOKEN" -H "Content-Type: application/json" -d "{\"nome\":\"Novo Fornecedor\",\"cnpj\":\"66.666.666/0001-66\"}"
+```
+
+### GET http://localhost:8084/api/fornecedores
+
+```bash
+curl http://localhost:8084/api/fornecedores -H "Authorization: Bearer COLE_O_ACCESS_TOKEN"
+```
+
+### GET http://localhost:8084/api/fornecedores/{id}
+
+```bash
+curl http://localhost:8084/api/fornecedores/1 -H "Authorization: Bearer COLE_O_ACCESS_TOKEN"
+```
+
+### PUT http://localhost:8084/api/fornecedores/{id}
+
+```bash
+curl -X PUT http://localhost:8084/api/fornecedores/1 -H "Authorization: Bearer COLE_O_ACCESS_TOKEN" -H "Content-Type: application/json" -d "{\"nome\":\"Fornecedor Atualizado\",\"cnpj\":\"66.666.666/0001-66\"}"
+```
+
+### DELETE http://localhost:8084/api/fornecedores/{id}
+
+```bash
+curl -X DELETE http://localhost:8084/api/fornecedores/1 -H "Authorization: Bearer COLE_O_ACCESS_TOKEN"
 ```
 
 Sem o cabecalho ou com um token invalido, a resposta sera `401 Unauthorized`. Com um token valido, a resposta sera semelhante a:
