@@ -1,4 +1,4 @@
-package br.edu.infnet.pedido;
+package br.edu.infnet.fornecedor;
 
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -47,7 +47,6 @@ public class JwtFiltro extends OncePerRequestFilter {
                 return;
             }
 
-            request.setAttribute("usuario", claims.getSubject());
             filterChain.doFilter(request, response);
         } catch (Exception exception) {
             responderNaoAutorizado(response, "Token invalido ou expirado");
